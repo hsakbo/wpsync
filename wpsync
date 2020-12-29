@@ -1,4 +1,5 @@
 #! /bin/sh
+
 perror() {
     echo $1 1>&2 && exit $2
 }
@@ -149,6 +150,8 @@ examples of usage --> root@localhost:dbname, sflash@192.168.10.107, dbname" 9
     fi
 
     mysql $mysql_extra "$to_user" $to_host -p"$to_pass" "$to_db" < ${workdir:="$DIR"}/tmp.sql
+    
+    rm ${workdir:="$DIR"}/tmp.sql
  
     from_user=
     from_host=
@@ -226,3 +229,5 @@ done < "$bcon"
 ### end logic for getting attributes inside [SYNC] tags
 
 #date "+%Y-%m-%d_%T"
+
+##bug: sed will replace = parameters inside '' when reassigned and has the same name. (194-update var if statement)
