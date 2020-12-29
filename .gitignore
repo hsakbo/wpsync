@@ -1,2 +1,4 @@
 .bconfig
 tmp.sh
+test*
+tmp*
