@@ -79,10 +79,112 @@ handle_sync() {
 }
 
 handle_db() {
-    echo stub
+    local line=$(($2+1))
+    tmp_ifs=$IFS
+    IFS=","
+    for hItems in $1; do
+	if [ ! "$hItems" ]; then
+	    continue
+	fi
+	local lval=`echo $hItems | awk -F= '{print $1}'`
+	local rval=`echo $hItems | awk -F= '{print $2}'`
+	case $lval in
+	    FROM)
+		if exprq "$rval" "^[^:@]*$"; then
+		    local from_user="-uroot"
+		    local from_db="$rval"
+		elif exprq "$rval" "^.*@.*:.*$"; then
+		    local from_user="-u`echo $rval | sed s/@.*$//`"
+		    local from_host="-h `echo $rval | sed s/^.*@// | sed s/:.*$//`"
+		    local from_db=`echo $rval | sed s/.*://`
+		else
+		    perror "Error: syntax error under line: $2 (from clause)
+examples of usage --> root@localhost:dbname, sflash@192.168.10.107, dbname" 8
+		fi
+		;;
+	    TO)
+		if exprq "$rval" "^[^:@]*$"; then
+		    local to_user="-uroot"
+		    local to_db="$rval"
+		elif exprq "$rval" "^.*@.*:.*$"; then
+		    local to_user="-u`echo $rval | sed s/@.*$//`"
+		    local to_host="-h `echo $rval | sed s/^.*@// | sed s/:.*$//`"
+		    local to_db=`echo $rval | sed s/.*://`
+		else
+		    perror "Error: syntax error under line: $2 (to clause)
+examples of usage --> root@localhost:dbname, sflash@192.168.10.107, dbname" 9
+		fi
+		;;
+	    FROM_PASSWORD)
+		local from_pass="$rval"
+		;;
+	    TO_PASSWORD)
+		local to_pass="$rval"
+		;;
+	    BACKUP)
+		local backup="$rval"
+		;;
+	    TABLE)
+		local table="$table --tables $rval"
+		;;
+	    WORKDIR)
+		local workdir="$rval"
+		;;
+	esac
+    done
+
+    IFS=$DEFAULT_IFS
+    echo "mysqldump $from_user $from_host -p$from_pass $from_db $table > ${workdir:=$DIR}/tmp.sql"
+    
+    mysqldump "$from_user" "$from_host" -p"$from_pass" "$from_db" "$table" > ${workdir:="$DIR"}/tmp.sql
+
+    if [ "$backup" ]; then
+	mysqldump "$to_user" "$to_host" -p"$to_pass" "$to_db" > "$to_db"_$(date '+%Y-%m-%d_%T')
+    fi
+
+    from_user=
+    from_host=
+    from_pass=
+    from_db=
+    table=
+    to_user=
+    to_host=
+    to_pass=
+    to_db=
+    backup=
+    workdir=
 }
 
-bcon="$(dirname $0)/.bconfig"
+inner_loop() {
+    PARAM=
+    inner_loop=0
+    while read -r inner_param; do
+	parse_line "$inner_param" "$VARIABLES"
+	inner_param=$PARSED_LINE
+	if [ $inner_loop -le $shifted ]; then
+	    inner_loop=$(($inner_loop+1))
+	    continue
+	elif [ "$inner_param" = "$1" ]; then
+	    inner_loop=$(($inner_loop+1))
+	    break
+	fi
+	PARAM="$PARAM,$inner_param"
+	inner_loop=$(($inner_loop+1))
+    done < "$bcon"
+}
+
+update_var() {
+    lval=`echo $1 | awk -F= '{print $1}'`
+    rval=`echo $1 | awk -F= '{print $2}'`
+    if exprq "$VARIABLES" "$lval=*," ; then
+	VARIABLES=`echo "$VARIABLES" | sed s/"$lval=.*,"/"$lval=$rval,"/`
+    else
+	VARIABLES="$1","$VARIABLES"
+    fi
+}
+
+DIR="$(dirname $0)"
+bcon="$DIR/.bconfig"
 if [ ! -f $bcon ]; then
     perror "error: bconfig file does not exist" 3
 fi
@@ -97,29 +199,18 @@ while read -r item; do
     parse_line "$item" "$VARIABLES"
     item=$PARSED_LINE
     if [ "$item" = '[SYNC]' ]; then
-	PARAM=
-	inner_loop=0
-	while read -r inner_param; do
-	    parse_line "$inner_param" "$VARIABLES"
-	    inner_param=$PARSED_LINE
-	    if [ $inner_loop -le $shifted ]; then
-		inner_loop=$(($inner_loop+1))
-		continue
-	    elif [ "$inner_param" = "[/SYNC]" ]; then
-		inner_loop=$(($inner_loop+1))
-		break
-	    fi
-	    PARAM="$PARAM,$inner_param"
-	    inner_loop=$(($inner_loop+1))
-	done < "$bcon"
+        inner_loop "[/SYNC]"
 	handle_sync $PARAM $shifted
 
     elif [ "$item" = '[DATABASE]' ]; then
-	handle_db
+        inner_loop "[/DATABASE]"
+	handle_db $PARAM $shifted
 
     elif exprq "$item" "^[a-zA-Z_0-9]*=*"; then
-	VARIABLES="$VARIABLES","$item"
+        update_var "$item"	
     fi
     shifted=$(($shifted+1))
 done < "$bcon"
 ### end logic for getting attributes inside [SYNC] tags
+
+#date "+%Y-%m-%d_%T"
